@@ -13,7 +13,7 @@ install: all
 	ln -sf grep $(DESTDIR)/usr/zegrep
 	ln -sf grep $(DESTDIR)/usr/zfgrep
 	install -d $(DESTDIR)/usr/share/man/man1
-	install -md644 grep.1 $(DESTDIR)/usr/share/man/man1
+	install -m644 grep.1 $(DESTDIR)/usr/share/man/man1
 	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/egrep.1
 	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/fgrep.1
 	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/zgrep.1
