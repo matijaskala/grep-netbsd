@@ -7,15 +7,9 @@ grep: fastgrep.c file.c grep.c queue.c util.c
 install: all
 	install -d $(DESTDIR)/usr/bin
 	install grep $(DESTDIR)/usr/bin
-	ln -sf grep $(DESTDIR)/usr/egrep
-	ln -sf grep $(DESTDIR)/usr/fgrep
-	ln -sf grep $(DESTDIR)/usr/zgrep
-	ln -sf grep $(DESTDIR)/usr/zegrep
-	ln -sf grep $(DESTDIR)/usr/zfgrep
+	ln -sf grep $(DESTDIR)/usr/bin/egrep
+	ln -sf grep $(DESTDIR)/usr/bin/fgrep
 	install -d $(DESTDIR)/usr/share/man/man1
 	install -m644 grep.1 $(DESTDIR)/usr/share/man/man1
 	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/egrep.1
 	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/fgrep.1
-	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/zgrep.1
-	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/zegrep.1
-	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/zfgrep.1
