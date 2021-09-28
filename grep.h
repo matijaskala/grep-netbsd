@@ -46,7 +46,7 @@
 #include <nl_types.h>
 
 extern nl_catd		 catalog;
-#define getstr(n)	 catgets(catalog, 1, n, errstr[n])
+#define getstr(n)	 (catalog != (nl_catd) -1 ? catgets(catalog, 1, n, errstr[n]) : errstr[n])
 #endif
 
 extern const char		*errstr[];

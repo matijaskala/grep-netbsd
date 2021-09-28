@@ -713,7 +713,8 @@ main(int argc, char *argv[])
 		}
 
 #ifndef WITHOUT_NLS
-	catclose(catalog);
+	if (catalog != (nl_catd) -1)
+		catclose(catalog);
 #endif
 
 	/* Find out the correct return value according to the
