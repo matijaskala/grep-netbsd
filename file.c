@@ -1,8 +1,10 @@
 /*	$NetBSD: file.c,v 1.11 2019/04/05 13:34:41 christos Exp $	*/
-/*	$FreeBSD: head/usr.bin/grep/file.c 211496 2010-08-19 09:28:59Z des $	*/
+/*	$FreeBSD$	*/
 /*	$OpenBSD: file.c,v 1.11 2010/07/02 20:48:48 nicm Exp $	*/
 
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ *
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
  * Copyright (C) 2008-2010 Gabor Kovesdan <gabor@FreeBSD.org>
  * Copyright (C) 2010 Dimitry Andric <dimitry@andric.com>
@@ -30,21 +32,16 @@
  * SUCH DAMAGE.
  */
 
-#if HAVE_NBTOOL_CONFIG_H
-#include "nbtool_config.h"
-#endif
-
-#include <sys/cdefs.h>
-__RCSID("$NetBSD: file.c,v 1.11 2019/04/05 13:34:41 christos Exp $");
-
 #include <sys/param.h>
-#include <sys/types.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -63,11 +60,12 @@ static gzFile gzbufdesc;
 static BZFILE* bzbufdesc;
 #endif
 
-static unsigned char buffer[MAXBUFSIZ + 1];
-static unsigned char *bufpos;
+static char *buffer;
+static char *bufpos;
 static size_t bufrem;
+static size_t fsiz;
 
-static unsigned char *lnbuf;
+static char *lnbuf;
 static size_t lnbuflen;
 
 static inline int
@@ -75,6 +73,9 @@ grep_refill(struct file *f)
 {
 	ssize_t nr = -1;
 	int bzerr;
+
+	if (filebehave == FILE_MMAP)
+		return (0);
 
 	bufpos = buffer;
 	bufrem = 0;
@@ -128,7 +129,7 @@ grep_refill(struct file *f)
 	return (0);
 }
 
-static inline void
+static inline int
 grep_lnbufgrow(size_t newlen)
 {
 
@@ -136,19 +137,14 @@ grep_lnbufgrow(size_t newlen)
 		lnbuf = grep_realloc(lnbuf, newlen);
 		lnbuflen = newlen;
 	}
-}
 
-static void
-grep_copyline(size_t off, size_t len)
-{
-	memcpy(lnbuf + off, bufpos, len);
-	lnbuf[off + len] = '\0';
+	return (0);
 }
 
 char *
-grep_fgetln(struct file *f, size_t *lenp)
+grep_fgetln(struct file *f, struct parsec *pc)
 {
-	unsigned char *p;
+	char *p;
 	size_t len;
 	size_t off;
 	ptrdiff_t diff;
@@ -159,82 +155,61 @@ grep_fgetln(struct file *f, size_t *lenp)
 
 	if (bufrem == 0) {
 		/* Return zero length to indicate EOF */
-		*lenp = 0;
-		return ((char *)bufpos);
+		pc->ln.len= 0;
+		return (bufpos);
 	}
 
 	/* Look for a newline in the remaining part of the buffer */
-	if ((p = memchr(bufpos, line_sep, bufrem)) != NULL) {
+	if ((p = memchr(bufpos, fileeol, bufrem)) != NULL) {
 		++p; /* advance over newline */
 		len = p - bufpos;
-		grep_lnbufgrow(len + 1);
-		grep_copyline(0, len);
-		*lenp = len;
+		if (grep_lnbufgrow(len + 1))
+			goto error;
+		memcpy(lnbuf, bufpos, len);
 		bufrem -= len;
 		bufpos = p;
-		return (char *)lnbuf;
+		pc->ln.len = len;
+		lnbuf[len] = '\0';
+		return (lnbuf);
 	}
 
 	/* We have to copy the current buffered data to the line buffer */
 	for (len = bufrem, off = 0; ; len += bufrem) {
 		/* Make sure there is room for more data */
-		grep_lnbufgrow(len + LNBUFBUMP);
-		grep_copyline(off, len - off);
+		if (grep_lnbufgrow(len + LNBUFBUMP))
+			goto error;
+		memcpy(lnbuf + off, bufpos, len - off);
+		/* With FILE_MMAP, this is EOF; there's no more to refill */
+		if (filebehave == FILE_MMAP) {
+			bufrem -= len;
+			break;
+		}
 		off = len;
+		/* Fetch more to try and find EOL/EOF */
 		if (grep_refill(f) != 0)
 			goto error;
 		if (bufrem == 0)
 			/* EOF: return partial line */
 			break;
-		if ((p = memchr(bufpos, line_sep, bufrem)) == NULL)
+		if ((p = memchr(bufpos, fileeol, bufrem)) == NULL)
 			continue;
 		/* got it: finish up the line (like code above) */
 		++p;
 		diff = p - bufpos;
 		len += diff;
-		grep_lnbufgrow(len + 1);
-		grep_copyline(off, diff);
+		if (grep_lnbufgrow(len + 1))
+		    goto error;
+		memcpy(lnbuf + off, bufpos, diff);
 		bufrem -= diff;
 		bufpos = p;
 		break;
 	}
-	*lenp = len;
-	return ((char *)lnbuf);
+	pc->ln.len = len;
+	lnbuf[len] = '\0';
+	return (lnbuf);
 
 error:
-	*lenp = 0;
-	return (NULL);
-}
-
-static inline struct file *
-grep_file_init(struct file *f)
-{
-
-#ifndef WITHOUT_GZIP
-	if (filebehave == FILE_GZIP &&
-	    (gzbufdesc = gzdopen(f->fd, "r")) == NULL)
-		goto error;
-#endif
-
-#ifndef WITHOUT_BZ2
-	if (filebehave == FILE_BZIP &&
-	    (bzbufdesc = BZ2_bzdopen(f->fd, "r")) == NULL)
-		goto error;
-#endif
-
-	/* Fill read buffer, also catches errors early */
-	if (grep_refill(f) != 0)
-		goto error;
-
-	/* Check for binary stuff, if necessary */
-	if (!nulldataflag && binbehave != BINFILE_TEXT &&
-	    memchr(bufpos, '\0', bufrem) != NULL)
-		f->binary = true;
-
-	return (f);
-error:
-	close(f->fd);
-	free(f);
+	pc->ln.len = 0;
 	return (NULL);
 }
 
@@ -252,12 +227,64 @@ grep_open(const char *path)
 		/* Processing stdin implies --line-buffered. */
 		lbflag = true;
 		f->fd = STDIN_FILENO;
-	} else if ((f->fd = open(path, O_RDONLY)) == -1) {
-		free(f);
-		return (NULL);
+	} else if ((f->fd = open(path, O_RDONLY)) == -1)
+		goto error1;
+
+	if (filebehave == FILE_MMAP) {
+		struct stat st;
+
+		if ((fstat(f->fd, &st) == -1) || (st.st_size > INT64_MAX) ||
+		    (!S_ISREG(st.st_mode)))
+			filebehave = FILE_STDIO;
+		else {
+			int flags = MAP_PRIVATE;
+#ifdef MAP_PREFAULT_READ
+			flags |= MAP_PREFAULT_READ;
+#endif
+			fsiz = st.st_size;
+			buffer = mmap(NULL, fsiz, PROT_READ, flags,
+			     f->fd, (off_t)0);
+			if (buffer == MAP_FAILED)
+				filebehave = FILE_STDIO;
+			else {
+				bufrem = st.st_size;
+				bufpos = buffer;
+				madvise(buffer, st.st_size, MADV_SEQUENTIAL);
+			}
+		}
 	}
 
-	return (grep_file_init(f));
+	if ((buffer == NULL) || (buffer == MAP_FAILED))
+		buffer = grep_malloc(MAXBUFSIZ);
+
+#ifndef WITHOUT_GZIP
+	if (filebehave == FILE_GZIP &&
+	    (gzbufdesc = gzdopen(f->fd, "r")) == NULL)
+		goto error2;
+#endif
+
+#ifndef WITHOUT_BZ2
+	if (filebehave == FILE_BZIP &&
+	    (bzbufdesc = BZ2_bzdopen(f->fd, "r")) == NULL)
+		goto error2;
+#endif
+
+	/* Fill read buffer, also catches errors early */
+	if (bufrem == 0 && grep_refill(f) != 0)
+		goto error2;
+
+	/* Check for binary stuff, if necessary */
+	if (binbehave != BINFILE_TEXT && fileeol != '\0' &&
+	    memchr(bufpos, '\0', bufrem) != NULL)
+		f->binary = true;
+
+	return (f);
+
+error2:
+	close(f->fd);
+error1:
+	free(f);
+	return (NULL);
 }
 
 /*
@@ -270,6 +297,10 @@ grep_close(struct file *f)
 	close(f->fd);
 
 	/* Reset read buffer and line buffer */
+	if (filebehave == FILE_MMAP) {
+		munmap(buffer, fsiz);
+		buffer = NULL;
+	}
 	bufpos = buffer;
 	bufrem = 0;
 

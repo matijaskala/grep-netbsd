@@ -1,4 +1,4 @@
-CFLAGS += $(shell pkg-config --cflags --libs libbsd-overlay) -lz -lbz2
+CFLAGS += $(shell pkg-config --cflags libbsd-overlay) -lz -lbz2
 
 all: grep
 
@@ -9,7 +9,12 @@ install: all
 	install grep $(DESTDIR)/usr/bin
 	ln -sf grep $(DESTDIR)/usr/bin/egrep
 	ln -sf grep $(DESTDIR)/usr/bin/fgrep
+	ln -sf grep $(DESTDIR)/usr/bin/rgrep
 	install -d $(DESTDIR)/usr/share/man/man1
 	install -m644 grep.1 $(DESTDIR)/usr/share/man/man1
 	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/egrep.1
 	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/fgrep.1
+	ln -sf grep.1 $(DESTDIR)/usr/share/man/man1/rgrep.1
+
+clean:
+	$(RM) grep

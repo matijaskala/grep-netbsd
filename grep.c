@@ -1,8 +1,10 @@
 /*	$NetBSD: grep.c,v 1.15 2018/08/12 09:03:21 christos Exp $	*/
-/* 	$FreeBSD: head/usr.bin/grep/grep.c 211519 2010-08-19 22:55:17Z delphij $	*/
+/* 	$FreeBSD$	*/
 /*	$OpenBSD: grep.c,v 1.42 2010/07/02 22:18:03 tedu Exp $	*/
 
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ *
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
  * Copyright (C) 2008-2009 Gabor Kovesdan <gabor@FreeBSD.org>
  * All rights reserved.
@@ -29,19 +31,13 @@
  * SUCH DAMAGE.
  */
 
-#if HAVE_NBTOOL_CONFIG_H
-#include "nbtool_config.h"
-#endif
-
-#include <sys/cdefs.h>
-__RCSID("$NetBSD: grep.c,v 1.15 2018/08/12 09:03:21 christos Exp $");
-
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <getopt.h>
 #include <limits.h>
 #include <libgen.h>
@@ -77,26 +73,29 @@ const char	*errstr[] = {
 };
 
 /* Flags passed to regcomp() and regexec() */
-int		 cflags = 0;
+int		 cflags = REG_NOSUB | REG_NEWLINE;
 int		 eflags = REG_STARTEND;
 
+bool		 matchall;
+
 /* Searching patterns */
-unsigned int	 patterns, pattern_sz;
+unsigned int	 patterns;
+static unsigned int pattern_sz;
 char		**pattern;
 regex_t		*r_pattern;
 fastgrep_t	*fg_pattern;
 
 /* Filename exclusion/inclusion patterns */
-unsigned int	 fpatterns, fpattern_sz;
-unsigned int	 dpatterns, dpattern_sz;
+unsigned int	fpatterns, dpatterns;
+static unsigned int fpattern_sz, dpattern_sz;
 struct epat	*dpattern, *fpattern;
 
 /* For regex errors  */
 char	 re_error[RE_ERROR_BUF + 1];
 
 /* Command-line flags */
-unsigned long long Aflag;	/* -A x: print x lines trailing each match */
-unsigned long long Bflag;	/* -B x: print x lines leading each match */
+long long Aflag;	/* -A x: print x lines trailing each match */
+long long Bflag;	/* -B x: print x lines leading each match */
 bool	 Hflag;		/* -H: always print file name */
 bool	 Lflag;		/* -L: only show names of files with no matches */
 bool	 bflag;		/* -b: show block numbers for each match */
@@ -105,7 +104,9 @@ bool	 hflag;		/* -h: don't print filename headers */
 bool	 iflag;		/* -i: ignore case */
 bool	 lflag;		/* -l: only show names of files with matches */
 bool	 mflag;		/* -m x: stop reading the files after x matches */
-unsigned long long mcount;	/* count for -m */
+long long mcount;	/* count for -m */
+long long mlimit;	/* requested value for -m */
+char	 fileeol;	/* indicator for eol */
 bool	 nflag;		/* -n: show line numbers in front of matching lines */
 bool	 oflag;		/* -o: print only matching part */
 bool	 qflag;		/* -q: quiet mode (don't output anything) */
@@ -115,8 +116,6 @@ bool	 wflag;		/* -w: pattern must start and end on word boundaries */
 bool	 xflag;		/* -x: pattern must match entire line */
 bool	 lbflag;	/* --line-buffered */
 bool	 nullflag;	/* --null */
-bool	 nulldataflag;	/* --null-data */
-unsigned char line_sep = '\n';	/* 0 for --null-data */
 char	*label;		/* --label */
 const char *color;	/* --color */
 int	 grepbehave = GREP_BASIC;	/* -EFGP: type of the regex */
@@ -146,8 +145,7 @@ enum {
 static inline const char	*init_color(const char *);
 
 /* Housekeeping */
-int	 tail;		/* lines left to print */
-bool	 notfound;	/* file not found */
+bool	 file_err;	/* file reading error */
 
 extern char	*__progname;
 
@@ -164,10 +162,9 @@ usage(void)
 	exit(2);
 }
 
-static const char optstr[] =
-    "0123456789A:B:C:D:EFGHIJLOPSRUVZabcd:e:f:hilm:nopqrsuvwxyz";
+static const char	*optstr = "0123456789A:B:C:D:EFGHIJLOPSRUVZabcd:e:f:hilm:nopqrsuvwxyz";
 
-struct option long_options[] =
+static const struct option long_options[] =
 {
 	{"binary-files",	required_argument,	NULL, BIN_OPT},
 #ifndef WITHOUT_GZIP
@@ -229,8 +226,11 @@ static void
 add_pattern(char *pat, size_t len)
 {
 
-	/* TODO: Check for empty patterns and shortcut */
-
+	/* Check if we can do a shortcut */
+	if (len == 0) {
+		matchall = true;
+		return;
+	}
 	/* Increase size if necessary */
 	if (patterns == pattern_sz) {
 		pattern_sz *= 2;
@@ -293,16 +293,23 @@ read_patterns(const char *fn)
 	size_t len;
 	ssize_t rlen;
 
-	if ((f = fopen(fn, "r")) == NULL)
+	if (strcmp(fn, "-") == 0)
+		f = stdin;
+	else if ((f = fopen(fn, "r")) == NULL)
 		err(2, "%s", fn);
-	line = NULL;
 	len = 0;
-	while ((rlen = getline(&line, &len, f)) != -1)
-		add_pattern(line, *line == '\n' ? 0 : (size_t)rlen);
+	line = NULL;
+	while ((rlen = getline(&line, &len, f)) != -1) {
+		if (line[0] == '\0')
+			continue;
+		add_pattern(line, line[0] == '\n' ? 0 : (size_t)rlen);
+	}
+
 	free(line);
 	if (ferror(f))
 		err(2, "%s", fn);
-	fclose(f);
+	if (strcmp(fn, "-") != 0)
+		fclose(f);
 }
 
 static inline const char *
@@ -311,7 +318,7 @@ init_color(const char *d)
 	char *c;
 
 	c = getenv("GREP_COLOR");
-	return (c != NULL ? c : d);
+	return (c != NULL && c[0] != '\0' ? c : d);
 }
 
 int
@@ -319,9 +326,10 @@ main(int argc, char *argv[])
 {
 	char **aargv, **eargv, *eopts;
 	char *ep;
-	unsigned long long l;
+	long long l;
 	unsigned int aargc, eargc, i, j;
 	int c, lastc, needpattern, newarg, prevoptind;
+	bool matched;
 
 	setlocale(LC_ALL, "");
 
@@ -341,6 +349,10 @@ main(int argc, char *argv[])
 		break;
 	case 'g':
 		grepbehave = GREP_BASIC;
+		break;
+	case 'r':
+		dirbehave = DIR_RECURSE;
+		Hflag = true;
 		break;
 #ifndef WITHOUT_GZIP
 	case 'z':
@@ -364,12 +376,13 @@ main(int argc, char *argv[])
 	newarg = 1;
 	prevoptind = 1;
 	needpattern = 1;
+	fileeol = '\n';
 
 	eopts = getenv("GREP_OPTIONS");
 
 	/* support for extra arguments in GREP_OPTIONS */
 	eargc = 0;
-	if (eopts != NULL) {
+	if (eopts != NULL && eopts[0] != '\0') {
 		char *str;
 
 		/* make an estimation of how many extra arguments we have */
@@ -382,7 +395,8 @@ main(int argc, char *argv[])
 		eargc = 0;
 		/* parse extra arguments */
 		while ((str = strsep(&eopts, " ")) != NULL)
-			eargv[eargc++] = grep_strdup(str);
+			if (str[0] != '\0')
+				eargv[eargc++] = grep_strdup(str);
 
 		aargv = (char **)grep_calloc(eargc + argc + 1,
 		    sizeof(char *));
@@ -406,10 +420,11 @@ main(int argc, char *argv[])
 		case '5': case '6': case '7': case '8': case '9':
 			if (newarg || !isdigit(lastc))
 				Aflag = 0;
-			else if (Aflag > LLONG_MAX / 10) {
+			else if (Aflag > LLONG_MAX / 10 - 1) {
 				errno = ERANGE;
 				err(2, NULL);
 			}
+
 			Aflag = Bflag = (Aflag * 10) + (c - '0');
 			break;
 		case 'C':
@@ -422,14 +437,17 @@ main(int argc, char *argv[])
 			/* FALLTHROUGH */
 		case 'B':
 			errno = 0;
-			l = strtoull(optarg, &ep, 10);
-			if (((errno == ERANGE) && (l == ULLONG_MAX)) ||
-			    ((errno == EINVAL) && (l == 0)))
+			l = strtoll(optarg, &ep, 10);
+			if (errno == ERANGE || errno == EINVAL)
 				err(2, NULL);
 			else if (ep[0] != '\0') {
 				errno = EINVAL;
 				err(2, NULL);
+			} else if (l < 0) {
+				errno = EINVAL;
+				err(2, "context argument must be non-negative");
 			}
+
 			if (c == 'A')
 				Aflag = l;
 			else if (c == 'B')
@@ -469,7 +487,13 @@ main(int argc, char *argv[])
 			grepbehave = GREP_EXTENDED;
 			break;
 		case 'e':
-			add_pattern(optarg, strlen(optarg));
+			{
+				char *token;
+				char *string = optarg;
+
+				while ((token = strsep(&string, "\n")) != NULL)
+					add_pattern(token, strlen(token));
+			}
 			needpattern = 0;
 			break;
 		case 'F':
@@ -513,8 +537,8 @@ main(int argc, char *argv[])
 		case 'm':
 			mflag = true;
 			errno = 0;
-			mcount = strtoull(optarg, &ep, 10);
-			if (((errno == ERANGE) && (mcount == ULLONG_MAX)) ||
+			mlimit = mcount = strtoll(optarg, &ep, 10);
+			if (((errno == ERANGE) && (mcount == LLONG_MAX)) ||
 			    ((errno == EINVAL) && (mcount == 0)))
 				err(2, NULL);
 			else if (ep[0] != '\0') {
@@ -530,6 +554,7 @@ main(int argc, char *argv[])
 			break;
 		case 'o':
 			oflag = true;
+			cflags &= ~REG_NOSUB;
 			break;
 		case 'p':
 			linkbehave = LINK_SKIP;
@@ -553,7 +578,7 @@ main(int argc, char *argv[])
 			break;
 		case 'u':
 		case MMAP_OPT:
-			/* noop, compatibility */
+			filebehave = FILE_MMAP;
 			break;
 		case 'V':
 			printf(getstr(9), __progname, VERSION);
@@ -563,16 +588,17 @@ main(int argc, char *argv[])
 			break;
 		case 'w':
 			wflag = true;
+			cflags &= ~REG_NOSUB;
 			break;
 		case 'x':
 			xflag = true;
+			cflags &= ~REG_NOSUB;
 			break;
 		case 'Z':
 			nullflag = true;
 			break;
 		case 'z':
-			nulldataflag = true;
-			line_sep = '\0';
+			fileeol = '\0';
 			break;
 		case BIN_OPT:
 			if (strcasecmp("binary", optarg) == 0)
@@ -603,6 +629,7 @@ main(int argc, char *argv[])
 			    strcasecmp("none", optarg) != 0 &&
 			    strcasecmp("no", optarg) != 0)
 				errx(2, getstr(3), "--color");
+			cflags &= ~REG_NOSUB;
 			break;
 #ifndef WITHOUT_GZIP
 		case DECOMPRESS_OPT:
@@ -642,20 +669,43 @@ main(int argc, char *argv[])
 	aargc -= optind;
 	aargv += optind;
 
+	/* xflag takes precedence, don't confuse the matching bits. */
+	if (wflag && xflag)
+		wflag = false;
+
 	/* Fail if we don't have any pattern */
 	if (aargc == 0 && needpattern)
 		usage();
 
 	/* Process patterns from command line */
 	if (aargc != 0 && needpattern) {
-		add_pattern(*aargv, strlen(*aargv));
+		char *token;
+		char *string = *aargv;
+
+		while ((token = strsep(&string, "\n")) != NULL)
+			add_pattern(token, strlen(token));
 		--aargc;
 		++aargv;
 	}
 
 	switch (grepbehave) {
-	case GREP_FIXED:
 	case GREP_BASIC:
+		break;
+	case GREP_FIXED:
+		/*
+		 * regex(3) implementations that support fixed-string searches generally
+		 * define either REG_NOSPEC or REG_LITERAL. Set the appropriate flag
+		 * here. If neither are defined, GREP_FIXED later implies that the
+		 * internal literal matcher should be used. Other cflags that have
+		 * the same interpretation as REG_NOSPEC and REG_LITERAL should be
+		 * similarly added here, and grep.h should be amended to take this into
+		 * consideration when defining WITH_INTERNAL_NOSPEC.
+		 */
+#if defined(REG_NOSPEC)
+		cflags |= REG_NOSPEC;
+#elif defined(REG_LITERAL)
+		cflags |= REG_LITERAL;
+#endif
 		break;
 	case GREP_EXTENDED:
 		cflags |= REG_EXTENDED;
@@ -700,24 +750,32 @@ main(int argc, char *argv[])
 	if ((aargc == 0 || aargc == 1) && !Hflag)
 		hflag = true;
 
-	if (aargc == 0)
+	initqueue();
+
+	if (aargc == 0 && dirbehave != DIR_RECURSE)
 		exit(!procfile("-"));
 
 	if (dirbehave == DIR_RECURSE)
-		c = grep_tree(aargv);
+		matched = grep_tree(aargv);
 	else
-		for (c = 0; aargc--; ++aargv) {
+		for (matched = false; aargc--; ++aargv) {
 			if ((finclude || fexclude) && !file_matching(*aargv))
 				continue;
-			c+= procfile(*aargv);
+			if (procfile(*aargv))
+				matched = true;
 		}
+
+	if (Lflag)
+		matched = !matched;
 
 #ifndef WITHOUT_NLS
 	if (catalog != (nl_catd) -1)
 		catclose(catalog);
 #endif
 
-	/* Find out the correct return value according to the
-	   results and the command line option. */
-	exit(c ? (notfound ? (qflag ? 0 : 2) : 0) : (notfound ? 2 : 1));
+	/*
+	 * Calculate the correct return value according to the
+	 * results and the command line option.
+	 */
+	exit(matched ? (file_err ? (qflag ? 0 : 2) : 0) : (file_err ? 2 : 1));
 }

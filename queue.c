@@ -1,8 +1,12 @@
 /*	$NetBSD: queue.c,v 1.5 2011/08/31 16:24:57 plunky Exp $	*/
-/*	$FreeBSD: head/usr.bin/grep/queue.c 211496 2010-08-19 09:28:59Z des $	*/
+/*	$FreeBSD$	*/
+
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ *
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
  * All rights reserved.
+ * Copyright (c) 2020 Kyle Evans <kevans@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,13 +35,6 @@
  * Dodge.  It is used in place of <sys/queue.h> to get a better performance.
  */
 
-#if HAVE_NBTOOL_CONFIG_H
-#include "nbtool_config.h"
-#endif
-
-#include <sys/cdefs.h>
-__RCSID("$NetBSD: queue.c,v 1.5 2011/08/31 16:24:57 plunky Exp $");
-
 #include <sys/param.h>
 #include <sys/queue.h>
 
@@ -46,71 +43,101 @@ __RCSID("$NetBSD: queue.c,v 1.5 2011/08/31 16:24:57 plunky Exp $");
 
 #include "grep.h"
 
-struct qentry {
-	STAILQ_ENTRY(qentry)	list;
-	struct str	 	data;
-};
+typedef struct str		qentry_t;
 
-static STAILQ_HEAD(, qentry)	queue = STAILQ_HEAD_INITIALIZER(queue);
-static unsigned long long	count;
+static long long		filled;
+static qentry_t			*qend, *qpool;
 
-static struct qentry	*dequeue(void);
+/*
+ * qnext is the next entry to populate.  qlist is where the list actually
+ * starts, for the purposes of printing.
+ */
+static qentry_t		*qlist, *qnext;
 
 void
-enqueue(struct str *x)
+initqueue(void)
 {
-	struct qentry *item;
 
-	item = grep_malloc(sizeof(struct qentry));
-	item->data.dat = grep_malloc(sizeof(char) * x->len);
-	item->data.len = x->len;
-	item->data.line_no = x->line_no;
-	item->data.off = x->off;
-	memcpy(item->data.dat, x->dat, x->len);
-	item->data.file = x->file;
-
-	STAILQ_INSERT_TAIL(&queue, item, list);
-
-	if (++count > Bflag) {
-		item = dequeue();
-		free(item->data.dat);
-		free(item);
-	}
+	qlist = qnext = qpool = grep_calloc(Bflag, sizeof(*qpool));
+	qend = qpool + (Bflag - 1);
 }
 
-static struct qentry *
-dequeue(void)
+static qentry_t *
+advqueue(qentry_t *itemp)
 {
-	struct qentry *item;
 
-	item = STAILQ_FIRST(&queue);
-	if (item == NULL)
-		return (NULL);
+	if (itemp == qend)
+		return (qpool);
+	return (itemp + 1);
+}
 
-	STAILQ_REMOVE_HEAD(&queue, list);
-	--count;
-	return (item);
+/*
+ * Enqueue another line; return true if we've dequeued a line as a result
+ */
+bool
+enqueue(struct str *x)
+{
+	qentry_t *item;
+	bool rotated;
+
+	item = qnext;
+	qnext = advqueue(qnext);
+	rotated = false;
+
+	if (filled < Bflag) {
+		filled++;
+	} else if (filled == Bflag) {
+		/* We had already filled up coming in; just rotate. */
+		qlist = advqueue(qlist);
+		rotated = true;
+		free(item->dat);
+	}
+	/* len + 1 for NUL-terminator */
+	item->dat = grep_malloc(sizeof(char) * x->len + 1);
+	item->len = x->len;
+	item->line_no = x->line_no;
+	item->boff = x->boff;
+	item->off = x->off;
+	memcpy(item->dat, x->dat, x->len);
+	item->dat[x->len] = '\0';
+	item->file = x->file;
+
+	return (rotated);
 }
 
 void
 printqueue(void)
 {
-	struct qentry *item;
+	qentry_t *item;
 
-	while ((item = dequeue()) != NULL) {
-		printline(&item->data, '-', NULL, 0);
-		free(item->data.dat);
-		free(item);
-	}
+	item = qlist;
+	do {
+		/* Buffer must have ended early. */
+		if (item->dat == NULL)
+			break;
+
+		grep_printline(item, '-');
+		free(item->dat);
+		item->dat = NULL;
+		item = advqueue(item);
+	} while (item != qlist);
+
+	qlist = qnext = qpool;
+	filled = 0;
 }
 
 void
 clearqueue(void)
 {
-	struct qentry *item;
+	qentry_t *item;
 
-	while ((item = dequeue()) != NULL) {
-		free(item->data.dat);
-		free(item);
-	}
+	item = qlist;
+	do {
+		free(item->dat);
+		item->dat = NULL;
+		item = advqueue(item);
+	} while (item != qlist);
+
+	qlist = qnext = qpool;
+	filled = 0;
 }

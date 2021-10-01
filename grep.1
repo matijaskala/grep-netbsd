@@ -1,5 +1,5 @@
 .\"	$NetBSD: grep.1,v 1.4 2012/04/08 22:00:38 wiz Exp $
-.\"	$FreeBSD: head/usr.bin/grep/grep.1 210652 2010-07-30 14:05:20Z joel $
+.\"	$FreeBSD$
 .\"	$OpenBSD: grep.1,v 1.38 2010/04/05 06:30:59 jmc Exp $
 .\" Copyright (c) 1980, 1990, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -30,15 +30,21 @@
 .\"
 .\"	@(#)grep.1	8.3 (Berkeley) 4/18/94
 .\"
-.Dd April 19, 2011
+.Dd April 17, 2021
 .Dt GREP 1
 .Os
 .Sh NAME
-.Nm grep , egrep , fgrep ,
-.Nm zgrep , zegrep , zfgrep
+.Nm grep ,
+.Nm egrep ,
+.Nm fgrep ,
+.Nm rgrep ,
+.Nm zgrep ,
+.Nm zegrep ,
+.Nm zfgrep
 .Nd file pattern searcher
 .Sh SYNOPSIS
 .Nm grep
+.Bk -words
 .Op Fl abcdDEFGHhIiJLlmnOopqRSsUVvwxZz
 .Op Fl A Ar num
 .Op Fl B Ar num
@@ -54,6 +60,7 @@
 .Op Fl Fl line-buffered
 .Op Ar pattern
 .Op Ar
+.Ek
 .Sh DESCRIPTION
 The
 .Nm grep
@@ -82,7 +89,7 @@ is quicker than both
 and
 .Nm egrep ,
 but can only handle fixed patterns
-(i.e. it does not interpret regular expressions).
+(i.e., it does not interpret regular expressions).
 Patterns may consist of one or more lines,
 allowing any of the pattern lines to match a portion of the input.
 .Pp
@@ -151,19 +158,40 @@ Only a count of selected lines is written to standard output.
 Mark up the matching text with the expression stored in
 .Ev GREP_COLOR
 environment variable.
-The possible values of when can be `never', `always' or `auto'.
+The possible values of
+.Ar when
+are
+.Dq Cm never ,
+.Dq Cm always
+and
+.Dq Cm auto .
 .It Fl D Ar action , Fl Fl devices Ns = Ns Ar action
-Specify the demanded action for devices, FIFOs and sockets.
-The default action is `read', which means, that they are read
-as if they were normal files.
-If the action is set to `skip', devices will be silently skipped.
+Specify the demanded
+.Ar action
+for devices, FIFOs and sockets.
+The default
+.Ar action
+is
+.Dq Cm read ,
+which means, that they are read as if they were normal files.
+If the
+.Ar action
+is set to
+.Dq Cm skip ,
+devices are silently skipped.
 .It Fl d Ar action , Fl Fl directories Ns = Ns Ar action
-Specify the demanded action for directories.
-It is `read' by default, which means that the directories
+Specify the demanded
+.Ar action
+for directories.
+It is
+.Dq Cm read
+by default, which means that the directories
 are read in the same manner as normal files.
-Other possible values are `skip' to silently ignore the
-directories, and `recurse' to read them recursively, which
-has the same effect as the
+Other possible values are
+.Dq Cm skip
+to silently ignore the directories, and
+.Dq Cm recurse
+to read them recursively, which has the same effect as the
 .Fl R
 and
 .Fl r
@@ -172,41 +200,53 @@ option.
 Interpret
 .Ar pattern
 as an extended regular expression
-(i.e. force
+(i.e., force
 .Nm grep
 to behave as
 .Nm egrep ) .
 .It Fl e Ar pattern , Fl Fl regexp Ns = Ns Ar pattern
-Specify a pattern used during the search of the input:
+Specify a
+.Ar pattern
+used during the search of the input:
 an input line is selected if it matches any of the specified patterns.
 This option is most useful when multiple
 .Fl e
 options are used to specify multiple patterns,
-or when a pattern begins with a dash
+or when a
+.Ar pattern
+begins with a dash
 .Pq Sq - .
-.It Fl Fl exclude
+.It Fl Fl exclude Ar pattern
 If specified, it excludes files matching the given
-filename pattern from the search.
+filename
+.Ar pattern
+from the search.
 Note that
 .Fl Fl exclude
-patterns take priority over
+and
 .Fl Fl include
-patterns, and if no
+patterns are processed in the order given.
+If a name matches multiple patterns, the latest matching rule wins.
+If no
 .Fl Fl include
 pattern is specified, all files are searched that are
 not excluded.
 Patterns are matched to the full path specified,
 not only to the filename component.
-.It Fl Fl exclude-dir
+.It Fl Fl exclude-dir Ar pattern
 If
 .Fl R
 is specified, it excludes directories matching the
-given filename pattern from the search.
+given filename
+.Ar pattern
+from the search.
 Note that
 .Fl Fl exclude-dir
-patterns take priority over
+and
 .Fl Fl include-dir
-patterns, and if no
+patterns are processed in the order given.
+If a name matches multiple patterns, the latest matching rule wins.
+If no
 .Fl Fl include-dir
 pattern is specified, all directories are searched that are
 not excluded.
@@ -230,7 +270,7 @@ is empty, nothing is matched.
 Interpret
 .Ar pattern
 as a basic regular expression
-(i.e. force
+(i.e., force
 .Nm grep
 to behave as traditional
 .Nm grep ) .
@@ -238,40 +278,44 @@ to behave as traditional
 Always print filename headers with output lines.
 .It Fl h , Fl Fl no-filename
 Never print filename headers
-.Pq i.e. filenames
+.Pq i.e., filenames
 with output lines.
 .It Fl Fl help
 Print a brief help message.
 .It Fl I
 Ignore binary files.
-This option is equivalent to
-.Fl Fl binary-file Ns = Ns Ar without-match
+This option is equivalent to the
+.Dq Fl Fl binary-file Ns = Ns Ar without-match
 option.
 .It Fl i , Fl Fl ignore-case
 Perform case insensitive matching.
 By default,
 .Nm grep
 is case sensitive.
-.It Fl Fl include
-If specified, only files matching the
-given filename pattern are searched.
+.It Fl Fl include Ar pattern
+If specified, only files matching the given filename
+.Ar pattern
+are searched.
 Note that
-.Fl Fl exclude
-patterns take priority over
 .Fl Fl include
-patterns.
+and
+.Fl Fl exclude
+patterns are processed in the order given.
+If a name matches multiple patterns, the latest matching rule wins.
 Patterns are matched to the full path specified,
 not only to the filename component.
-.It Fl Fl include-dir
+.It Fl Fl include-dir Ar pattern
 If
 .Fl R
-is specified, only directories matching the
-given filename pattern are searched.
+is specified, only directories matching the given filename
+.Ar pattern
+are searched.
 Note that
-.Fl Fl exclude-dir
-patterns take priority over
 .Fl Fl include-dir
-patterns.
+and
+.Fl Fl exclude-dir
+patterns are processed in the order given.
+If a name matches multiple patterns, the latest matching rule wins.
 .It Fl J, Fl Fl bz2decompress
 Decompress the
 .Xr bzip2 1
@@ -282,7 +326,9 @@ standard output.
 Pathnames are listed once per file searched.
 If the standard input is searched, the string
 .Dq (standard input)
-is written.
+is written unless a
+.Fl Fl label
+is specified.
 .It Fl l , Fl Fl files-with-matches
 Only the names of files containing selected lines are written to
 standard output.
@@ -292,7 +338,18 @@ making searches potentially less expensive.
 Pathnames are listed once per file searched.
 If the standard input is searched, the string
 .Dq (standard input)
-is written.
+is written unless a
+.Fl Fl label
+is specified.
+.It Fl Fl label
+Label to use in place of
+.Dq (standard input)
+for a file name where a file name would normally be printed.
+This option applies to
+.Fl H ,
+.Fl L ,
+and
+.Fl l .
 .It Fl Fl mmap
 Use
 .Xr mmap 2
@@ -300,7 +357,7 @@ instead of
 .Xr read 2
 to read input, which can result in better performance under some
 circumstances but can cause undefined behaviour.
-.It Fl m Ar num, Fl Fl max-count Ns = Ns Ar num
+.It Fl m Ar num , Fl Fl max-count Ns = Ns Ar num
 Stop reading the file after
 .Ar num
 matches.
@@ -322,7 +379,7 @@ If
 is specified, follow symbolic links only if they were explicitly listed
 on the command line.
 The default is not to follow symbolic links.
-.It Fl o, Fl Fl only-matching
+.It Fl o , Fl Fl only-matching
 Prints only the matching part of the lines.
 .It Fl p
 If
@@ -337,6 +394,10 @@ will only search a file until a match has been found,
 making searches potentially less expensive.
 .It Fl R , Fl r , Fl Fl recursive
 Recursively search subdirectories listed.
+(i.e., force
+.Nm grep
+to behave as
+.Nm rgrep ) .
 .It Fl S
 If
 .Fl R
@@ -345,7 +406,7 @@ The default is not to follow symbolic links.
 .It Fl s , Fl Fl no-messages
 Silent mode.
 Nonexistent and unreadable files are ignored
-(i.e. their error messages are suppressed).
+(i.e., their error messages are suppressed).
 .It Fl U , Fl Fl binary
 Search binary files, but do not attempt to print them.
 .It Fl V , Fl Fl version
@@ -361,6 +422,9 @@ and
 .Sq [[:>:]] ;
 see
 .Xr re_format 7 ) .
+This option has no effect if
+.Fl x
+is also specified.
 .It Fl x , Fl Fl line-regexp
 Only input lines selected against an entire fixed string or regular
 expression are considered to be matching lines.
@@ -374,14 +438,14 @@ Prints a zero-byte after the file name.
 Use the zero byte (ASCII NUL) as line separator.
 .It Fl Fl binary-files Ns = Ns Ar value
 Controls searching and printing of binary files.
-Options are
-.Ar binary ,
-the default: search binary files but do not print them;
-.Ar without-match :
-do not search binary files;
-and
-.Ar text :
-treat all files as text.
+Options are:
+.Bl -tag -compact -width "binary (default)"
+.It Cm binary No (default)
+Search binary files but do not print them.
+.It Cm without-match
+Do not search binary files.
+.It Cm text
+Treat all files as text.
 .It Fl Fl decompress
 Detect input files compressed with
 .Xr bzip2 1
@@ -399,6 +463,13 @@ and block buffered otherwise.
 .Pp
 .El
 If no file arguments are specified, the standard input is used.
+Additionally,
+.Dq Cm -
+may be used in place of a file name, anywhere that a file name is accepted, to
+read from standard input.
+This includes both
+.Fl f
+and file arguments.
 .Sh EXIT STATUS
 The
 .Nm grep
@@ -413,13 +484,27 @@ No lines were selected.
 An error occurred.
 .El
 .Sh EXAMPLES
-To find all occurrences of the word
+Find all occurrences of the pattern
 .Sq patricia
 in a file:
 .Pp
 .Dl $ grep 'patricia' myfile
 .Pp
-To find all occurrences of the pattern
+Same as above but looking only for complete words:
+.Pp
+.Dl $ grep -w 'patricia' myfile
+.Pp
+Count occurrences of the exact pattern
+.Sq FOO
+:
+.Pp
+.Dl $ grep -c FOO myfile
+.Pp
+Same as above but ignoring case:
+.Pp
+.Dl $ grep -c -i FOO myfile
+.Pp
+Find all occurrences of the pattern
 .Ql .Pp
 at the beginning of a line:
 .Pp
@@ -437,20 +522,28 @@ escapes the
 .Ql \&. ,
 which would otherwise match any character.
 .Pp
-To find all lines in a file which do not contain the words
+Find all lines in a file which do not contain the words
 .Sq foo
 or
 .Sq bar :
 .Pp
 .Dl $ grep -v -e 'foo' -e 'bar' myfile
 .Pp
-A simple example of an extended regular expression:
+Peruse the file
+.Sq calendar
+looking for either 19, 20, or 25 using extended regular expressions:
 .Pp
 .Dl $ egrep '19|20|25' calendar
 .Pp
-Peruses the file
-.Sq calendar
-looking for either 19, 20, or 25.
+Show matching lines and the name of the
+.Sq *.h
+files which contain the pattern
+.Sq FIXME .
+Do the search recursively from the
+.Pa /usr/src/sys/arm
+directory
+.Pp
+.Dl $ grep -H -R FIXME --include=*.h /usr/src/sys/arm/
 .Sh SEE ALSO
 .Xr ed 1 ,
 .Xr ex 1 ,
