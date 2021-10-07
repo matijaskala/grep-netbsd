@@ -765,9 +765,6 @@ main(int argc, char *argv[])
 				matched = true;
 		}
 
-	if (Lflag)
-		matched = !matched;
-
 #ifndef WITHOUT_NLS
 	if (catalog != (nl_catd) -1)
 		catclose(catalog);
