@@ -79,14 +79,13 @@ bool
 file_matching(const char *fname)
 {
 	char *fname_base, *fname_buf;
-	unsigned int i;
 	bool ret;
 
 	ret = finclude ? false : true;
 	fname_buf = grep_strdup(fname);
 	fname_base = basename(fname_buf);
 
-	for (i = 0; i < fpatterns; ++i) {
+	for (unsigned int i = 0; i < fpatterns; ++i) {
 		if (fnmatch(fpattern[i].pat, fname, 0) == 0 ||
 		    fnmatch(fpattern[i].pat, fname_base, 0) == 0)
 			/*
@@ -102,12 +101,11 @@ file_matching(const char *fname)
 static inline bool
 dir_matching(const char *dname)
 {
-	unsigned int i;
 	bool ret;
 
 	ret = dinclude ? false : true;
 
-	for (i = 0; i < dpatterns; ++i) {
+	for (unsigned int i = 0; i < dpatterns; ++i) {
 		if (dname != NULL && fnmatch(dpattern[i].pat, dname, 0) == 0)
 			/*
 			 * The last pattern matched wins exclusion/inclusion
@@ -465,6 +463,31 @@ litexec(const struct pat *pat, const char *string, size_t nmatch,
 
 #define iswword(x)	(iswalnum((x)) || (x) == L'_')
 
+#if !defined REG_STARTEND || REG_STARTEND == 0
+static int regexec_startend(
+    const regex_t *restrict preg, const char *restrict str, size_t nmatch,
+    regmatch_t pmatch[restrict], int eflags
+) {
+	regoff_t so = pmatch[0].rm_so;
+	regoff_t eo = pmatch[0].rm_eo;
+	char *buf = malloc(eo - so + 1);
+	memcpy(buf, str + pmatch[0].rm_so, eo - so);
+	buf[eo - so] = '\0';
+	int ret = regexec(preg, buf, nmatch, pmatch, eflags);
+	pmatch[0].rm_so += so;
+	pmatch[0].rm_eo += so;
+	free(buf);
+	return ret;
+}
+#else
+static int regexec_startend(
+    const regex_t *restrict preg, const char *restrict str, size_t nmatch,
+    regmatch_t pmatch[restrict], int eflags
+) {
+	return regexec(preg, str, nmatch, pmatch, eflags);
+}
+#endif
+
 /*
  * Processes a line comparing it with the specified patterns.  Each pattern
  * is looped to be compared along with the full string, saving each and every
@@ -525,11 +548,11 @@ procline(struct parsec *pc)
 			leflags |= REG_NOTBOL;
 		/* Loop to compare with all the patterns */
 		for (i = 0; i < patterns; i++) {
-			pmatch.rm_so = 0;
-			pmatch.rm_eo = pc->ln.len - st;
+			pmatch.rm_so = st;
+			pmatch.rm_eo = pc->ln.len;
 #ifdef WITH_INTERNAL_NOSPEC
 			if (grepbehave == GREP_FIXED)
-				r = litexec(&pattern[i], pc->ln.dat + st, 1, &pmatch);
+				r = litexec(&pattern[i], pc->ln.dat, 1, &pmatch);
 			else
 #endif
 /*
@@ -538,13 +561,11 @@ procline(struct parsec *pc)
  */
 			if (fg_pattern[i].pattern)
 				r = grep_search(&fg_pattern[i],
-				    (unsigned char *)pc->ln.dat + st,
+				    (unsigned char *)pc->ln.dat,
 				    pc->ln.len, &pmatch);
 			else
-			r = regexec(&r_pattern[i], pc->ln.dat + st, 1, &pmatch,
+			r = regexec_startend(&r_pattern[i], pc->ln.dat, 1, &pmatch,
 			    leflags);
-			pmatch.rm_so += st;
-			pmatch.rm_eo += st;
 			if (r != 0)
 				continue;
 			/* Check for full match */

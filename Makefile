@@ -1,4 +1,4 @@
-CFLAGS += $(shell pkg-config --cflags libbsd-overlay) -lz -lbz2
+CFLAGS += $(shell pkg-config --cflags libbsd-overlay) -lz -lbz2 -D_GNU_SOURCE
 
 all: grep
 

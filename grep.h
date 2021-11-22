@@ -59,6 +59,10 @@ extern const char		*errstr[];
 #define	GREP_BASIC	1
 #define	GREP_EXTENDED	2
 
+#if !defined(REG_NOSPEC) && !defined(REG_LITERAL)
+#define WITH_INTERNAL_NOSPEC
+#endif
+
 #define	BINFILE_BIN	0
 #define	BINFILE_SKIP	1
 #define	BINFILE_TEXT	2
@@ -96,6 +100,11 @@ struct str {
 	char		*dat;
 	char		*file;
 	int		 line_no;
+};
+
+struct pat {
+	char		*pat;
+	int		 len;
 };
 
 struct epat {
@@ -147,7 +156,7 @@ extern int	 binbehave, devbehave, dirbehave, filebehave, grepbehave, linkbehave;
 
 extern bool	 file_err, matchall;
 extern unsigned int dpatterns, fpatterns, patterns;
-extern char    **pattern;
+extern struct pat *pattern;
 extern struct epat *dpattern, *fpattern;
 extern regex_t	*er_pattern, *r_pattern;
 extern fastgrep_t *fg_pattern;
