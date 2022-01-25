@@ -1,8 +1,9 @@
-CFLAGS += $(shell pkg-config --cflags libbsd-overlay) -lz -lbz2 -D_GNU_SOURCE
+CFLAGS += $(shell pkg-config --cflags libbsd-overlay) -D_GNU_SOURCE -I.
+LDLIBS += -lz -lbz2 $(shell $(LD) -lfts -o /dev/null && echo -lfts)
 
 all: grep
 
-grep: fastgrep.c file.c grep.c queue.c util.c
+grep: fastgrep.c file.c grep.c queue.c util.c  regcomp.c regerror.c regexec.c regfree.c
 
 install: all
 	install -d $(DESTDIR)/usr/bin
